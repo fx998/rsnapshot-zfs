@@ -3682,7 +3682,7 @@ sub rsync_backup_point {
 	if ($interval eq 'sync') {
 		push(@cmd_stack, "$config_vars{'snapshot_root'}/.sync/$$bp_ref{'dest'}");
 	} else {
-		push(@cmd_stack, "$config_vars{'snapshot_root'}/$interval.0/$$bp_ref{'dest'}");
+		push(@cmd_stack, "$config_vars{'snapshot_root'}/$$bp_ref{'dest'}");
 	}
 	#
 	# END RSYNC COMMAND ASSEMBLY
@@ -4120,20 +4120,6 @@ sub create_backup_point_dir {
 	if ($destpath =~ m/\/$/) {
 		$destpath = remove_trailing_slash($destpath);
 	}
-	
-	# create the directory if it doesn't exist
-	if ( ! -e "$destpath" ) {
-		print_cmd("mkdir -m 0755 -p $destpath/");
-		
-		if (0 == $test) {
-			eval {
-				mkpath( "$destpath", 0, 0755 );
-			};
-			if ($@) {
-				bail("Could not mkpath(\"$destpath/\", 0, 0755);");
-			}
-		}
-	}
 }
 
 # accepts interval we're operating on
@@ -4224,7 +4210,7 @@ sub touch_interval_dir {
 	if ($interval eq 'sync') {
 		$interval_dir = '.sync';
 	} else {
-		$interval_dir = $interval . '.0';
+		$interval_dir="";
 	}
 	
 	# update mtime of $interval.0 to reflect the time this snapshot was taken
