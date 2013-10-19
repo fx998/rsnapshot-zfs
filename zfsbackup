@@ -1,0 +1,179 @@
+#!/usr/local/bin/bash
+
+ZFS=/sbin/zfs
+
+  hourly_max=6
+   daily_max=7
+  weekly_max=4
+ monthly_max=6
+
+        hpre=1
+        dpre=2
+        wpre=3
+        mpre=4
+
+h="Stunde"
+hm="Stunden"
+d="Tag"
+dm="Tagen"
+w="Woche"
+wm="Wochen"
+m="Monat"
+mm="Monaten"
+
+# backup_root faengt ohne slash an, da das ein ZFS-Volume ist
+backup_root=backup
+frontend_root=/backup/frontend
+
+function timestamp {
+
+	date +"%Y-%m-%d_%H-%M-%S"
+}
+
+function _exec {
+	cmd="$*"
+	# echo $cmd
+	$cmd
+}
+
+function remove_link_and_snapshot {
+
+	link="$*"
+	target="$(readlink $link)"
+	echo "Deleting Link+Snapshot for $link"
+	# echo "Link: $link"
+	# echo "Snapshot: $snapshot"
+	[ -L "$link"                   ] && rm -f "$link"
+
+	if [ -n "$target" ]; then
+		snapshot="$backup_root@$(basename $target)"
+	     	[ -d "$target" ] && _exec $ZFS destroy "$snapshot"
+	fi
+
+}
+
+if [ $# -lt 1 ]; then
+	echo "Usage: $(basename $0) <hourly|daily|weekly|monthly>"
+fi
+
+ACTION=$1
+
+
+/usr/bin/logger -P local7.info -t zfsbackup "Backup $ACTION started"
+
+
+case "$ACTION" in
+	hourly)
+		remove_link_and_snapshot "$frontend_root/$hpre$(printf '%02d' $hourly_max)_vor_${hourly_max}_$hm"
+		for((i=$hourly_max;$i>1;i--)); do 
+			[[ $i -eq 2 ]] && name="$h" || name="$hm"
+			current_link="$frontend_root/$hpre$(printf '%02d' $i)_vor_${i}_$hm"
+			    new_link="$frontend_root/$hpre$(printf '%02d' $(($i-1)))_vor_$(($i-1))_$name"
+			link_target_current=$(readlink "$current_link")
+			    link_target_new=$(readlink "$new_link")
+
+			if [ -n "$link_target_current" -a $hourly_max -eq $i ];then
+				echo "Destroying oldest hourly snapshot"
+				_exec "$ZFS destroy $backup_root@$(basename $link_target_current)"
+			fi
+
+			if [ -n "$link_target_new" ]; then
+				current_link="$hpre$(printf '%02d' $i)_vor_${i}_$hm"
+				echo "Setting link $current_link to snapshot $link_target_new"
+				_exec rm -f "$frontend_root/$current_link"
+				_exec ln -sf "$link_target_new" "$current_link"
+			fi
+		done	
+	
+		echo "Creating new hourly snapshot"
+		snapshot_name=$(timestamp)
+		_exec "$ZFS snapshot $backup_root@$snapshot_name" 
+		_exec "rm -f $frontend_root/${hpre}01_vor_1_Stunde"
+		_exec "ln -sf /$backup_root/.zfs/snapshot/$snapshot_name $frontend_root/${hpre}01_vor_1_Stunde"
+		_exec "/usr/local/bin/rsnapshot -v hourly"
+				
+		;;
+	daily)
+		remove_link_and_snapshot "$frontend_root/$hpre$(printf '%02d' $daily_max)_vor_${daily_max}_$hm"
+		for((i=$daily_max;$i>1;i--)); do 
+			[[ $i -eq 2 ]] && name="$d" || name="$dm"
+			current_link="$frontend_root/$dpre$(printf '%02d' $i)_vor_${i}_$dm"
+			    new_link="$frontend_root/$dpre$(printf '%02d' $(($i-1)))_vor_$(($i-1))_$name"
+			link_target_current=$(readlink "$current_link")
+			    link_target_new=$(readlink "$new_link")
+
+			if [ -n "$link_target_current" -a $daily_max -eq $i ];then
+				echo "Destroying oldest daily snapshot"
+				_exec "$ZFS destroy $backup_root@$(basename $link_target_current)"
+			fi
+
+			if [ -n "$link_target_new" ]; then
+				_exec rm -f "$frontend_root/$dpre$(printf '%02d' $i)_vor_${i}_$dm"
+				_exec ln -sf "$link_target_new" "$frontend_root/$dpre$(printf '%02d' $i)_vor_${i}_$dm"
+			fi
+		done	
+	
+		echo "Moving last hourly to daily"
+		_exec "rm -f $frontend_root/${dpre}01_vor_1_Tag"
+		    last_hourly_link="$frontend_root/$hpre$(printf '%02d' $hourly_max)_vor_${hourly_max}_$hm"
+		last_hourly_snapshot=$(readlink "$last_hourly_link")
+		_exec "ln -sf $last_hourly_snapshot $frontend_root/${dpre}01_vor_1_Tag"
+		;;
+	weekly)
+		remove_link_and_snapshot "$frontend_root/$wpre$(printf '%02d' $weekly_max)_vor_${weekly_max}_$wm"
+		for((i=$weekly_max;$i>1;i--)); do 
+			[[ $i -eq 2 ]] && name="$w" || name="$wm"
+			current_link="$frontend_root/$wpre$(printf '%02d' $i)_vor_${i}_$wm"
+			    new_link="$frontend_root/$wpre$(printf '%02d' $(($i-1)))_vor_$(($i-1))_$name"
+			link_target_current=$(readlink "$current_link")
+			    link_target_new=$(readlink "$new_link")
+
+			if [ -n "$link_target_current" -a $weekly_max -eq $i ];then
+				echo "Destroying oldest weekly snapshot"
+				_exec "$ZFS destroy $backup_root@$(basename $link_target_current)"
+			fi
+
+			if [ -n "$link_target_new" ]; then
+				_exec rm -f "$frontend_root/$wpre$(printf '%02d' $i)_vor_${i}_$wm"
+				_exec ln -sf "$link_target_new" "$frontend_root/$wpre$(printf '%02d' $i)_vor_${i}_$wm"
+			fi
+		done	
+	
+		echo "Moving last daily to weekly"
+		_exec "rm -f $frontend_root/${wpre}01_vor_1_Woche"
+		    last_daily_link="$frontend_root/$dpre$(printf '%02d' $daily_max)_vor_${daily_max}_$dm"
+		last_daily_snapshot=$(readlink "$last_daily_link")
+		_exec "ln -sf $last_daily_snapshot $frontend_root/${wpre}01_vor_1_Woche"
+		;;
+	monthly)
+		remove_link_and_snapshot "$frontend_root/$mpre$(printf '%02d' $monthly_max)_vor_${monthly_max}_$mm"
+		for((i=$monthly_max;$i>1;i--)); do 
+			[[ $i -eq 2 ]] && name="$m" || name="$mm"
+			current_link="$frontend_root/$mpre$(printf '%02d' $i)_vor_${i}_$mm"
+			    new_link="$frontend_root/$mpre$(printf '%02d' $(($i-1)))_vor_$(($i-1))_$name"
+			link_target_current=$(readlink "$current_link")
+			    link_target_new=$(readlink "$new_link")
+
+			if [ -n "$link_target_current" -a $monthly_max -eq $i ];then
+				echo "Destroying oldest monthly snapshot"
+				_exec "$ZFS destroy $backup_root@$(basename $link_target_current)"
+			fi
+
+			if [ -n "$link_target_new" ]; then
+				_exec rm -f "$frontend_root/$mpre$(printf '%02d' $i)_vor_${i}_$mm"
+				_exec ln -sf "$link_target_new" "$frontend_root/$mpre$(printf '%02d' $i)_vor_${i}_$mm"
+			fi
+		done	
+	
+		echo "Moving last weekly to monthly"
+		_exec "rm -f $frontend_root/${mpre}01_vor_1_Monat"
+		    last_weekly_link="$frontend_root/$wpre$(printf '%02d' $weekly_max)_vor_${weekly_max}_$wm"
+		last_weekly_snapshot=$(readlink "$last_weekly_link")
+		_exec "ln -sf $last_weekly_snapshot $frontend_root/${mpre}01_vor_1_Monat"
+		;;
+	*)
+	echo "Usage: $(basename $0) <hourly|daily|weekly|monthly>"
+	;;
+esac
+
+/usr/bin/logger -P local7.info -t zfsbackup "Backup $ACTION finished"
