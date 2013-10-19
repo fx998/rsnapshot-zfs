@@ -5,4 +5,5 @@ Some patches which are reflecting my changes to use rsnapshot
 with backing up on a zfs storage.
 
 E-Mail:		mremailer999-github@yahoo.de
+Environment:	FreeBSD 9.2
 
